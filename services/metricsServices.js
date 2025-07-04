@@ -20,15 +20,8 @@ const httpDurationHistogram = new client.Histogram({
   registers: [register],
 });
 
-const roadtripsCreatedTotal = new client.Counter({
-  name: 'roadtrips_created_total',
-  help: 'Nombre total de roadtrips créés',
-  registers: [register],
-});
-
 module.exports = {
   register,
   httpRequestsTotal,
   httpDurationHistogram,
-  roadtripsCreatedTotal,
 };

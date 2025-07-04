@@ -103,8 +103,15 @@ class AuthController {
       const refreshToken = JwtConfig.generateRefreshToken(newUser);
 
       if (!provider && !isVerified) {
-        setImmediate(async () => {
+        process.nextTick(async () => {
           try {
+            logger.info("🚀 Démarrage envoi email de confirmation", {
+              service: "auth-service",
+              action: "email_send_start",
+              email: newUser.email,
+              userId: newUser._id,
+            });
+
             const currentUser = await User.findById(newUser._id);
             if (currentUser && currentUser.isVerified) {
               logger.info(
@@ -119,28 +126,48 @@ class AuthController {
               return;
             }
 
-            await NotificationService.sendConfirmationEmail(
+            if (!currentUser || !currentUser.verificationToken) {
+              logger.error("❌ Token de vérification manquant", {
+                service: "auth-service",
+                action: "missing_verification_token",
+                email: newUser.email,
+                userId: newUser._id,
+                hasUser: !!currentUser,
+                hasToken: !!currentUser?.verificationToken,
+              });
+              return;
+            }
+
+            logger.info("📧 Tentative d'envoi email de confirmation", {
+              service: "auth-service",
+              action: "email_send_attempt",
+              email: newUser.email,
+              token: newUser.verificationToken.substring(0, 8) + "...",
+            });
+
+            const emailResult = await NotificationService.sendConfirmationEmail(
               newUser.email,
               newUser.verificationToken
             );
 
-            logger.info(
-              "✅ Email de confirmation envoyé avec succès en arrière-plan",
-              {
-                service: "auth-service",
-                action: "background_email_success",
-                email: newUser.email,
-              }
-            );
+            logger.info("✅ Résultat envoi email de confirmation", {
+              service: "auth-service",
+              action: "email_send_result",
+              email: newUser.email,
+              status: emailResult?.status,
+              success: emailResult?.status === 200,
+            });
           } catch (error) {
             logger.error(
-              "❌ Échec de l'envoi d'email de confirmation en arrière-plan",
+              "❌ Erreur critique lors de l'envoi d'email de confirmation",
               {
                 service: "auth-service",
-                action: "background_email_error",
+                action: "email_send_critical_error",
                 email: newUser.email,
                 error: error.message,
+                stack: error.stack,
                 errorCode: error.code,
+                errorName: error.name,
               }
             );
           }
@@ -860,9 +887,11 @@ class AuthController {
         });
       }
 
-      if (phoneNumber && phoneNumber !== user.phoneNumber) {
+      const normalizedPhoneNumber = phoneNumber === "" ? null : phoneNumber;
+
+      if (normalizedPhoneNumber && normalizedPhoneNumber !== user.phoneNumber) {
         const existingUserWithPhone = await User.findOne({
-          phoneNumber,
+          phoneNumber: normalizedPhoneNumber,
           _id: { $ne: userId },
         });
 
@@ -879,7 +908,12 @@ class AuthController {
         }
       }
 
-      const allowedUpdates = { firstName, lastName, phoneNumber };
+      const allowedUpdates = {
+        firstName,
+        lastName,
+        phoneNumber: normalizedPhoneNumber,
+      };
+
       for (const key in allowedUpdates) {
         if (allowedUpdates[key] !== undefined) {
           user[key] = allowedUpdates[key];
